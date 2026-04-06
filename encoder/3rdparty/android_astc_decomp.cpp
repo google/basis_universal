@@ -1,4 +1,8 @@
 // File: android_astc_decomp.cpp
+//
+// 4/3/2026: Globally set BASISU_DISABLE_ANDROID_ASTC_DECOMP to 1 to completely disable this code and redirect all calls to our internal ASTC decoder in astc_helpers.h.
+// 
+// decodeVoidExtentBlock(): Fixing function so bits 10-11 are properly checked (they must both be 1 according to the spec), otherwise fuzzing using random 128-bit bit blocks doesn't match ARM or our decoder's output.
 
 /*-------------------------------------------------------------------------
  * drawElements Quality Program Tester Core
@@ -27,7 +31,16 @@
  * \file
  * \brief ASTC Utilities.
  *//*--------------------------------------------------------------------*/
-#include "android_astc_decomp.h"
+
+// Set BASISU_DISABLE_ANDROID_ASTC_DECOMP to 1 to completely disable dEQP's code (we'll use our own internal decoder in this case, but you'll lose validation vs. a 2nd decoder).
+#ifndef BASISU_DISABLE_ANDROID_ASTC_DECOMP
+#define BASISU_DISABLE_ANDROID_ASTC_DECOMP (0)
+#endif
+
+#if !BASISU_DISABLE_ANDROID_ASTC_DECOMP
+
+#include <vector>
+#include <stdint.h>
 #include <assert.h>
 #include <algorithm>
 #include <fenv.h>
@@ -715,6 +728,15 @@ inline void setASTCErrorColorBlock (void* dst, int blockWidth, int blockHeight, 
 
 DecompressResult decodeVoidExtentBlock (void* dst, const Block128& blockData, int blockWidth, int blockHeight, bool isSRGB, bool isLDRMode)
 {
+    // rg: Adding check here to match ARM's decoder and basisu's.
+    // 18.23.Void - Extent Blocks
+    // "Bits 10 and 11 are reserved and must be 1."
+    if (blockData.getBits(10, 11) != 3)
+    {
+        setASTCErrorColorBlock(dst, blockWidth, blockHeight, isSRGB);
+        return DECOMPRESS_RESULT_ERROR;
+    }
+
     const deUint32  minSExtent          = blockData.getBits(12, 24);
     const deUint32  maxSExtent          = blockData.getBits(25, 37);
     const deUint32  minTExtent          = blockData.getBits(38, 50);
@@ -2045,9 +2067,9 @@ bool decompress_hdr(float* pDstRGBA, const uint8_t* data, int blockWidth, int bl
     return true;
 }
 
-bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
+bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool& is_hdr_flag)
 {
-    is_hdr = false;
+    is_hdr_flag = false;
 
     const Block128 blockData(data);
 
@@ -2057,7 +2079,7 @@ bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
         return false;
     }
 
-    is_hdr = (status == 1);
+    is_hdr_flag = (status == 1);
 
     return true;
 }
@@ -2069,3 +2091,5 @@ bool is_hdr(const uint8_t* data, int blockWidth, int blockHeight, bool &is_hdr)
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+#endif // BASISU_DISABLE_ANDROID_ASTC_DECOMP
